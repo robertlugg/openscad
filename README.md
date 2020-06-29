@@ -104,14 +104,14 @@ libraries from aptitude. If you're using Mac, or an older Linux/BSD, there
 are build scripts that download and compile the libraries from source. 
 Follow the instructions for the platform you're compiling on below.
 
-* A C++ compiler supporting C++11
+* A C++ compiler supporting C++14
 * [Qt (5.4 ->)](https://qt.io/)
-* [QScintilla2 (2.7 ->)](https://riverbankcomputing.com/software/qscintilla/)
-* [CGAL (3.6 ->)](https://www.cgal.org/)
+* [QScintilla2 (2.9 ->)](https://riverbankcomputing.com/software/qscintilla/)
+* [CGAL (4.9 ->)](https://www.cgal.org/)
  * [GMP (5.x)](https://gmplib.org/)
  * [MPFR (3.x)](https://www.mpfr.org/)
 * [cmake (2.8 ->, required by CGAL and the test framework)](https://cmake.org/)
-* [boost (1.35 ->)](https://www.boost.org/)
+* [boost (1.55 ->)](https://www.boost.org/)
 * [OpenCSG (1.3.2 ->)](http://www.opencsg.org/)
 * [GLEW (1.5.4 ->)](http://glew.sourceforge.net/)
 * [Eigen (3.x)](https://eigen.tuxfamily.org/)

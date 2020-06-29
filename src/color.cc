@@ -256,9 +256,9 @@ boost::optional<Color4f> parse_hex_color(const std::string& hex) {
 
 AbstractNode *ColorModule::instantiate(const std::shared_ptr<Context>& ctx, const ModuleInstantiation *inst, const std::shared_ptr<EvalContext>& evalctx) const
 {
-	auto node = new ColorNode(inst);
+	auto node = new ColorNode(inst, evalctx);
 
-	AssignmentList args{Assignment("c"), Assignment("alpha")};
+	AssignmentList args{assignment("c"), assignment("alpha")};
 
 	ContextHandle<Context> c{Context::create<Context>(ctx)};
 	c->setVariables(evalctx, args);

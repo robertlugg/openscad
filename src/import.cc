@@ -50,7 +50,6 @@ namespace fs = boost::filesystem;
 #include <boost/assign/std/vector.hpp>
 using namespace boost::assign; // bring 'operator+=()' into scope
 
-#include <boost/detail/endian.hpp>
 #include <cstdint>
 
 extern PolySet * import_amf(std::string, const Location &loc);
@@ -67,13 +66,13 @@ public:
 AbstractNode *ImportModule::instantiate(const std::shared_ptr<Context>& ctx, const ModuleInstantiation *inst, const std::shared_ptr<EvalContext>& evalctx) const
 {
   AssignmentList args{
-    Assignment("file"), Assignment("layer"), Assignment("convexity"),
-		Assignment("origin"), Assignment("scale")
+    assignment("file"), assignment("layer"), assignment("convexity"),
+		assignment("origin"), assignment("scale")
 	};
-	
+
 	AssignmentList optargs{
-		Assignment("width"), Assignment("height"),
-		Assignment("filename"), Assignment("layername"), Assignment("center"), Assignment("dpi")
+		assignment("width"), assignment("height"),
+		assignment("filename"), assignment("layername"), assignment("center"), assignment("dpi")
 	};
 
 	ContextHandle<Context> c{Context::create<Context>(ctx)};
@@ -89,7 +88,7 @@ AbstractNode *ImportModule::instantiate(const std::shared_ptr<Context>& ctx, con
 		filename = lookup_file(v.isUndefined() ? "" : v.toString(), inst->path(), ctx->documentPath());
 	} else {
 		const auto &filename_val = c->lookup_variable("filename", true);
-		if (!filename_val.isUndefined()) {
+		if (filename_val.isDefined()) {
 			printDeprecation("filename= is deprecated. Please use file=");
 		}
 		filename = lookup_file(filename_val.isUndefined() ? "" : filename_val.toString(), inst->path(), ctx->documentPath());
@@ -108,7 +107,7 @@ AbstractNode *ImportModule::instantiate(const std::shared_ptr<Context>& ctx, con
 		else if (ext == ".svg") actualtype = ImportType::SVG;
 	}
 
-	auto node = new ImportNode(inst, actualtype);
+	auto node = new ImportNode(inst, evalctx, actualtype);
 
 	node->fn = c->lookup_variable("$fn").toDouble();
 	node->fs = c->lookup_variable("$fs").toDouble();
@@ -163,7 +162,7 @@ AbstractNode *ImportModule::instantiate(const std::shared_ptr<Context>& ctx, con
 	const auto &height = c->lookup_variable("height", true);
 	node->width = (width.type() == Value::ValueType::NUMBER) ? width.toDouble() : -1;
 	node->height = (height.type() == Value::ValueType::NUMBER) ? height.toDouble() : -1;
-	
+
 	return node;
 }
 

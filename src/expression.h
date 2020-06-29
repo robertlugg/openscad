@@ -40,6 +40,7 @@ public:
 	enum class Op {
 		LogicalAnd,
 		LogicalOr,
+		Exponent,
 		Multiply,
 		Divide,
 		Modulo,
@@ -120,7 +121,7 @@ public:
 	Vector(const Location &loc);
 	Value evaluate(const std::shared_ptr<Context>& context) const override;
 	void print(std::ostream &stream, const std::string &indent) const override;
-	void push_back(Expression *expr);
+	void emplace_back(Expression *expr);
 	bool isLiteral() const override;
 private:
 	std::vector<shared_ptr<Expression>> children;

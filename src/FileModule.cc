@@ -71,7 +71,10 @@ void FileModule::registerUse(const std::string path, const Location &loc)
 			PRINTB("ERROR: Can't read font with path '%s'", path);
 		}
 	} else {
-		usedlibs.insert(path);
+		auto pos = std::find(usedlibs.begin(), usedlibs.end(), path);
+		if(pos != usedlibs.end())
+			usedlibs.erase(pos);
+		usedlibs.insert(usedlibs.begin(), path);
 		if (!loc.isNone()) {
 			indicatorData.emplace_back(loc.firstLine(), loc.firstColumn(), loc.lastColumn() - loc.firstColumn(), path);
 		}
@@ -109,7 +112,7 @@ time_t FileModule::include_modified(const IncludeFile &inc) const
 	if (StatCache::stat(inc.filename.c_str(), st) == 0) {
 		return st.st_mtime;
 	}
-	
+
 	return 0;
 }
 
@@ -167,8 +170,9 @@ time_t FileModule::handleDependencies(bool is_root)
 
 	// Relative filenames which were located are reinserted as absolute filenames
 	for (const auto &files : updates) {
-		this->usedlibs.erase(files.first);
-		this->usedlibs.insert(files.second);
+		auto pos = std::find(usedlibs.begin(), usedlibs.end(), files.first);
+		if(pos != usedlibs.end())
+			*pos = files.second;
 	}
 	return latest;
 }
@@ -176,7 +180,7 @@ time_t FileModule::handleDependencies(bool is_root)
 AbstractNode *FileModule::instantiate(const std::shared_ptr<Context>& ctx, const ModuleInstantiation *inst, const std::shared_ptr<EvalContext>& evalctx) const
 {
 	assert(!evalctx);
-	
+
 	ContextHandle<FileContext> context{Context::create<FileContext>(ctx)};
 	return this->instantiateWithFileContext(context.ctx, inst, evalctx);
 }
@@ -184,8 +188,8 @@ AbstractNode *FileModule::instantiate(const std::shared_ptr<Context>& ctx, const
 AbstractNode *FileModule::instantiateWithFileContext(const std::shared_ptr<FileContext>& ctx, const ModuleInstantiation *inst, const std::shared_ptr<EvalContext>& evalctx) const
 {
 	assert(!evalctx);
-	
-	auto node = new RootNode(inst);
+
+	auto node = new RootNode(inst, evalctx);
 	try {
 		ctx->initializeModule(*this); // May throw an ExperimentalFeatureException
 		// FIXME: Set document path to the path of the module

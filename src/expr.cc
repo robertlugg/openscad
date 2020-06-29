@@ -28,6 +28,7 @@
 #include "value.h"
 #include "evalcontext.h"
 #include <cstdint>
+#include <cmath>
 #include <assert.h>
 #include <sstream>
 #include <algorithm>
@@ -59,10 +60,10 @@ namespace /* anonymous*/ {
 
 	std::ostream &operator << (std::ostream &o, AssignmentList const& l) {
 		for (size_t i=0; i < l.size(); i++) {
-			const Assignment &arg = l[i];
+			const auto &arg = l[i];
 			if (i > 0) o << ", ";
-			if (!arg.name.empty()) o << arg.name  << " = ";
-			o << *arg.expr;
+			if (!arg->name.empty()) o << arg->name  << " = ";
+			o << *arg->expr;
 		}
 		return o;
 	}
@@ -132,6 +133,9 @@ Value BinaryOp::evaluate(const std::shared_ptr<Context>& context) const
 	case Op::LogicalOr:
 		return Value(this->left->evaluate(context) || this->right->evaluate(context));
 		break;
+	case Op::Exponent:
+		return Value(pow(this->left->evaluate(context).toDouble(), this->right->evaluate(context).toDouble()));
+		break;
 	case Op::Multiply:
 		return Value(this->left->evaluate(context) * this->right->evaluate(context));
 		break;
@@ -179,6 +183,9 @@ const char *BinaryOp::opString() const
 		break;
 	case Op::LogicalOr:
 		return "||";
+		break;
+	case Op::Exponent:
+		return "^";
 		break;
 	case Op::Multiply:
 		return "*";
@@ -284,18 +291,51 @@ Range::Range(Expression *begin, Expression *step, Expression *end, const Locatio
 {
 }
 
+/**
+ * This is separated because both PRINT_DEPRECATION and PRINT use
+ * quite a lot of stack space and the method using it evaluate()
+ * is called often when recursive functions are evaluated.
+ * noinline is required, as we here specifically optimize for stack usage
+ * during normal operating, not runtime during error handling.
+*/
+static void NOINLINE print_range_depr(const Location &loc, const std::shared_ptr<Context>& ctx){
+	std::string locs = loc.toRelativeString(ctx->documentPath());
+	PRINT_DEPRECATION("Using ranges of the form [begin:end] with begin value greater than the end value is deprecated, %s", locs);
+}
+static void NOINLINE print_range_err(const std::string &begin, const std::string &step, const Location &loc, const std::shared_ptr<Context>& ctx){
+	std::string locs = loc.toRelativeString(ctx->documentPath());
+	PRINTB("WARNING: begin %s than the end, but step %s, %s", begin % step % locs);
+}
+
 Value Range::evaluate(const std::shared_ptr<Context>& context) const
 {
 	Value beginValue = this->begin->evaluate(context);
 	if (beginValue.type() == Value::ValueType::NUMBER) {
 		Value endValue = this->end->evaluate(context);
 		if (endValue.type() == Value::ValueType::NUMBER) {
+			double begin_val = beginValue.toDouble();
+			double end_val   = endValue.toDouble();
+			
 			if (!this->step) {
-				return Value{RangePtr{RangeType{beginValue.toDouble(), endValue.toDouble()}}};
+				if(end_val < begin_val){
+					std::swap(begin_val,end_val);
+					print_range_depr(loc, context);
+				}
+				
+				return Value{RangePtr{RangeType{begin_val, end_val}}};
 			} else {
 				Value stepValue = this->step->evaluate(context);
 				if (stepValue.type() == Value::ValueType::NUMBER) {
-					return Value{RangePtr{RangeType{beginValue.toDouble(), stepValue.toDouble(), endValue.toDouble()}}};
+					double step_val = stepValue.toDouble();
+					if(this->isLiteral()){
+						if ((step_val>0) && (end_val < begin_val)) {
+							print_range_err("is greater", "is positive", loc, context);
+						}else if ((step_val<0) && (end_val > begin_val)) {
+							print_range_err("is smaller", "is negative", loc, context);
+						}
+					}
+
+					return Value{RangePtr{RangeType{begin_val, step_val, end_val}}};
 				}
 			}
 		}
@@ -340,9 +380,9 @@ bool Vector::isLiteral() const {
 	return true;
 }
 
-void Vector::push_back(Expression *expr)
+void Vector::emplace_back(Expression *expr)
 {
-	this->children.push_back(shared_ptr<Expression>(expr));
+	this->children.emplace_back(expr);
 }
 
 Value Vector::evaluate(const std::shared_ptr<Context>& context) const
@@ -361,7 +401,6 @@ Value Vector::evaluate(const std::shared_ptr<Context>& context) const
 	}
 	return Value(vec);
 }
-
 
 void Vector::print(std::ostream &stream, const std::string &) const
 {
@@ -433,9 +472,9 @@ void FunctionDefinition::print(std::ostream &stream, const std::string &indent) 
 	stream << indent << "function(";
 	bool first = true;
 	for (const auto& assignment : definition_arguments) {
-		stream << (first ? "" : ", ") << assignment.name;
-		if (assignment.expr) {
-			stream << " = " << *assignment.expr.get();
+		stream << (first ? "" : ", ") << assignment->name;
+		if (assignment->expr) {
+			stream << " = " << *assignment->expr.get();
 		}
 		first = false;
 	}
@@ -491,14 +530,18 @@ FunctionCall::FunctionCall(Expression *expr, const AssignmentList &args, const L
 */
 void FunctionCall::prepareTailCallContext(const std::shared_ptr<Context> context, std::shared_ptr<Context> tailCallContext, const AssignmentList &definition_arguments)
 {
-	if (this->resolvedArguments.empty()) {
+	if (this->resolvedArguments.empty() && !this->arguments.empty()) {
 		// Figure out parameter names
 		ContextHandle<EvalContext> ec{Context::create<EvalContext>(context, this->arguments, this->loc)};
 		this->resolvedArguments = ec->resolveArguments(definition_arguments, {}, false);
+	}
+
+	// FIXME: evaluate defaultArguments in FunctionDefinition / UserFunction and pass to FunctionCall instead of definition_arguments ?
+	if (this->defaultArguments.empty() && !definition_arguments.empty()) {
 		// Assign default values for unspecified parameters
 		for (const auto &arg : definition_arguments) {
-			if (this->resolvedArguments.find(arg.name) == this->resolvedArguments.end()) {
-				this->defaultArguments.emplace_back(arg.name, arg.expr ? arg.expr->evaluate(context) : Value{});
+			if (this->resolvedArguments.find(arg->name) == this->resolvedArguments.end()) {
+				this->defaultArguments.emplace_back(arg->name, arg->expr ? arg->expr->evaluate(context) : Value{});
 			}
 		}
 	}
@@ -812,7 +855,7 @@ Value LcForC::evaluate(const std::shared_ptr<Context>& context) const
 
         ContextHandle<Context> tmp{Context::create<Context>(c.ctx)};
         evaluate_sequential_assignment(this->incr_arguments, tmp.ctx, this->loc);
-        c->take_variables(tmp.ctx);
+        c->apply_variables(tmp.ctx);
     }    
 
     if (isListComprehension(this->expr)) {
@@ -850,15 +893,15 @@ void LcLet::print(std::ostream &stream, const std::string &) const
 void evaluate_assert(const std::shared_ptr<Context>& context, const std::shared_ptr<EvalContext> evalctx)
 {
 	AssignmentList args;
-	args += Assignment("condition"), Assignment("message");
+	args += assignment("condition"), assignment("message");
 
 	ContextHandle<Context> c{Context::create<Context>(context)};
 
 	AssignmentMap assignments = evalctx->resolveArguments(args, {}, false);
 	for (const auto &arg : args) {
-		auto it = assignments.find(arg.name);
+		auto it = assignments.find(arg->name);
 		if (it != assignments.end()) {
-			c->set_variable(arg.name, assignments[arg.name]->evaluate(evalctx));
+			c->set_variable(arg->name, assignments[arg->name]->evaluate(evalctx));
 		}
 	}
 	

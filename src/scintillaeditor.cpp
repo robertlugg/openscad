@@ -1,20 +1,24 @@
+#include <ciso646> // C alternative tokens (xor)
 #include <stdlib.h>
 #include <algorithm>
+#include <boost/filesystem.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/json_parser.hpp>
+
 #include <QString>
 #include <QChar>
-#include "scintillaeditor.h"
+#include <QShortcut>
 #include <Qsci/qscicommandset.h>
+
+#include "scintillaeditor.h"
 #include "Preferences.h"
 #include "PlatformUtils.h"
 #include "settings.h"
 #include "QSettingsCached.h"
-#include <ciso646> // C alternative tokens (xor)
-#include <boost/filesystem.hpp>
-#include <boost/property_tree/ptree.hpp>
-#include <boost/property_tree/json_parser.hpp>
+
 namespace fs=boost::filesystem;
 
-QString ScintillaEditor::cursorPlaceHolder = "^~^";
+const QString ScintillaEditor::cursorPlaceHolder = "^~^";
 
 class SettingsConverter {
 public:
@@ -152,6 +156,20 @@ ScintillaEditor::ScintillaEditor(QWidget *parent) : EditorInterface(parent)
 	c = qsci->standardCommands()->boundTo(Qt::Key_Insert | Qt::CTRL);
 	c->setAlternateKey(0);
 
+#ifdef Q_OS_MAC
+	const unsigned long modifier = Qt::META;
+#else
+	const unsigned long modifier = Qt::CTRL;
+#endif
+
+	QShortcut *shortcutCalltip;
+	shortcutCalltip = new QShortcut(modifier | Qt::SHIFT | Qt::Key_Space, this);
+	connect(shortcutCalltip, &QShortcut::activated, [=]() { qsci->callTip(); });
+
+	QShortcut *shortcutAutocomplete;
+	shortcutAutocomplete = new QShortcut(modifier | Qt::Key_Space, this);
+	connect(shortcutAutocomplete, &QShortcut::activated, [=]() { qsci->autoCompleteFromAll(); });
+
 	scintillaLayout->setContentsMargins(0, 0, 0, 0);
 	scintillaLayout->addWidget(qsci);
 
@@ -273,7 +291,8 @@ void ScintillaEditor::applySettings()
 	if(Preferences::inst()->getValue("editor/enableAutocomplete").toBool())
 	{
 		qsci->setAutoCompletionSource(QsciScintilla::AcsAPIs);
-		qsci->setAutoCompletionFillupsEnabled(true);
+		qsci->setAutoCompletionFillupsEnabled(false);
+ 		qsci->setAutoCompletionFillups("(");		
 		qsci->setCallTipsVisible(10);
 		qsci->setCallTipsStyle(QsciScintilla::CallTipsContext);
 	}
@@ -313,9 +332,7 @@ QString ScintillaEditor::toPlainText()
 void ScintillaEditor::setContentModified(bool modified)
 {
 	// FIXME: Due to an issue with QScintilla, we need to do this on the document itself.
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
 	qsci->SCN_SAVEPOINTLEFT();
-#endif
 	qsci->setModified(modified);
 }
 
@@ -347,15 +364,6 @@ QColor ScintillaEditor::readColor(const boost::property_tree::ptree &pt, const s
 {
 	try {
 		const auto val = pt.get<std::string>(name);
-#if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
-		if ((val.length() == 9) && (val.at(0) == '#')) {
-			const auto rgb = std::string("#") + val.substr(3);
-			QColor qcol(rgb.c_str());
-			auto alpha = std::strtoul(val.substr(1, 2).c_str(), 0, 16);
-			qcol.setAlpha(alpha);
-			return qcol;
-		}
-#endif
 		return QColor(val.c_str());
 	} catch (const std::exception &e) {
 		return defaultColor;
@@ -631,23 +639,22 @@ int ScintillaEditor::updateFindIndicators(const QString &findText, bool visibili
 {
 	int findwordcount{0};
 
-    auto txt = qsci->text();
+	qsci->SendScintilla(QsciScintilla::SCI_SETINDICATORCURRENT, findIndicatorNumber);
+	qsci->SendScintilla(qsci->SCI_INDICATORCLEARRANGE, 0, qsci->length());
 
-    qsci->SendScintilla(QsciScintilla::SCI_SETINDICATORCURRENT, findIndicatorNumber);
-    qsci->SendScintilla(qsci->SCI_INDICATORCLEARRANGE, 0, txt.length());
-
-    auto pos = txt.indexOf(findText);
-    auto len = findText.length();
-    if (visibility && len>0) {
-        while (pos!=-1){
-            findwordcount++;
-            qsci->SendScintilla(qsci->SCI_SETINDICATORCURRENT, findIndicatorNumber);
-            qsci->SendScintilla(qsci->SCI_INDICATORFILLRANGE, pos, len);
-            pos = txt.indexOf(findText,pos+len);
-        };
-    }
-    //qsci->findFirst(findText, false, false, false, true, true, savelineFrom, saveindexFrom);
-    return findwordcount;
+	const auto txt = qsci->text().toUtf8();
+	const auto findTextUtf8 = findText.toUtf8();
+	auto pos = txt.indexOf(findTextUtf8);
+	auto len = findTextUtf8.length();
+	if (visibility && len > 0) {
+		while (pos != -1) {
+			findwordcount++;
+			qsci->SendScintilla(qsci->SCI_SETINDICATORCURRENT, findIndicatorNumber);
+			qsci->SendScintilla(qsci->SCI_INDICATORFILLRANGE, pos, len);
+			pos = txt.indexOf(findTextUtf8, pos + len);
+		};
+	}
+	return findwordcount;
 }
 
 bool ScintillaEditor::find(const QString &expr, bool findNext, bool findBackwards)
@@ -1153,6 +1160,11 @@ void ScintillaEditor::onIndicatorClicked(int line, int col, Qt::KeyboardModifier
 	if(val >= hyperlinkIndicatorOffset && val <= hyperlinkIndicatorOffset+indicatorData.size())	{
 		emit hyperlinkIndicatorClicked(val - hyperlinkIndicatorOffset);
 	}
+}
+
+void ScintillaEditor::setCursorPosition(int line, int col)
+{
+	qsci->setCursorPosition(line, col);
 }
 
 void ScintillaEditor::updateSymbolMarginVisibility()

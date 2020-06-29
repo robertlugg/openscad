@@ -527,7 +527,7 @@ public:
 	std::string operator()(const RangePtr &v) const
 		{
 			const uint32_t steps = v->numValues();
-			if (steps >= 10000) {
+			if (steps >= RangeType::MAX_RANGE_STEPS) {
 				PRINTB("WARNING: Bad range parameter in for statement: too many elements (%lu).", steps);
 				return "";
 			}
@@ -648,6 +648,14 @@ public:
   template <typename T> bool operator()(const T &op1, const T &op2) const {
     return op1 == op2;
   }
+
+  bool operator()(const bool &op1, const double &op2) const {
+    return op1 == op2;
+  }
+
+  bool operator()(const double &op1, const bool &op2) const {
+    return op1 == op2;
+  }
 };
 
 bool Value::operator==(const Value &v) const
@@ -669,7 +677,7 @@ bool Value::operator!=(const Value &v) const
 			return false;																											\
 		}																																		\
 																																				\
-		bool operator()(const bool &op1, const bool &op2) const {						\
+		template <typename T> bool operator()(const T &op1, const T &op2) const {	\
 			return op1 op op2;																								\
 		}																																		\
 																																				\
@@ -678,14 +686,6 @@ bool Value::operator!=(const Value &v) const
 		}																																		\
 																																				\
 		bool operator()(const double &op1, const bool &op2) const {					\
-			return op1 op op2;																								\
-		}																																		\
-																																				\
-		bool operator()(const double &op1, const double &op2) const {				\
-			return op1 op op2;																								\
-		}																																		\
-																																				\
-		bool operator()(const str_utf8_wrapper &op1, const str_utf8_wrapper &op2) const {	\
 			return op1 op op2;																								\
 		}																																		\
 	}
@@ -802,19 +802,27 @@ Value Value::multmatvec(const VectorType &matrixvec, const VectorType &vectorvec
 Value Value::multvecmat(const VectorType &vectorvec, const VectorType &matrixvec)
 {
 	assert(vectorvec.size() == matrixvec.size());
-// Vector * Matrix
 	VectorPtr dstv;
-	for (size_t i=0;i<matrixvec[0].toVectorPtr()->size();i++) {
+	size_t firstRowSize = matrixvec[0].toVectorPtr()->size();
+	for (size_t i=0;i<firstRowSize;i++) {
 		double r_e = 0.0;
 		for (size_t j=0;j<vectorvec.size();j++) {
 			if (matrixvec[j].type() != ValueType::VECTOR ||
-					matrixvec[j].toVectorPtr()[i].type() != ValueType::NUMBER ||
-					vectorvec[j].type() != ValueType::NUMBER) {
-				return {};
+					matrixvec[j].toVectorPtr()->size() != firstRowSize) {
+				PRINTB("WARNING: Matrix must be rectangular. Problem at row %lu", j);
+				return Value();
+			}
+			if (vectorvec[j].type() != ValueType::NUMBER) {
+				PRINTB("WARNING: Vector must contain only numbers. Problem at index %lu", j);
+				return Value();
+			}
+			if (matrixvec[j].toVectorPtr()[i].type() != ValueType::NUMBER) {
+				PRINTB("WARNING: Matrix must contain only numbers. Problem at row %lu, col %lu", j % i);
+				return Value();
 			}
 			r_e += vectorvec[j].toDouble() * matrixvec[j].toVectorPtr()[i].toDouble();
 		}
-		dstv->push_back(Value(r_e));
+		dstv->emplace_back(r_e);
 	}
 	return Value(dstv);
 }
@@ -944,7 +952,7 @@ public:
   Value operator()(const Value::VectorPtr &vec, const double &idx) const {
     const auto i = convert_to_uint32(idx);
     if (i < vec->size()) return vec[i].clone();
-    return {};
+    return Value();
   }
 
   Value operator()(const RangePtr &range, const double &idx) const {
@@ -954,12 +962,12 @@ public:
     case 1: return Value(range->step_val);
     case 2: return Value(range->end_val);
     }
-    return {};
+    return Value();
   }
 
   template <typename T, typename U> Value operator()(const T &, const U &) const {
     //    std::cout << "generic bracket_visitor\n";
-    return {};
+    return Value();
   }
 };
 
@@ -974,49 +982,39 @@ Value Value::operator[](size_t idx) const
   return boost::apply_visitor(bracket_visitor(), this->value, v.value);
 }
 
-void RangeType::normalize()
-{
-  if ((step_val>0) && (end_val < begin_val)) {
-    std::swap(begin_val,end_val);
-    printDeprecation("Using ranges of the form [begin:end] with begin value greater than the end value is deprecated.");
-  }
-}
-
 uint32_t RangeType::numValues() const
 {
-  if (std::isnan(begin_val) || std::isnan(end_val) || std::isnan(step_val)) {
+
+	if (std::isnan(begin_val) || std::isnan(end_val) || std::isnan(step_val)) {
 		return 0;
 	}
 
-  if (std::isinf(begin_val) || (std::isinf(end_val))) {
-    return std::numeric_limits<uint32_t>::max();
-  }
+	if (step_val < 0) {
+		if (begin_val < end_val) {
+			return 0;
+		}
+	} else {
+		if (begin_val > end_val) {
+		return 0;
+		}
+	}
 
-  if ((begin_val == end_val) || std::isinf(step_val)) {
-    return 1;
-  }
+	if ((begin_val == end_val) || std::isinf(step_val)) {
+		return 1;
+	}
 
-  if (step_val == 0) {
-    return std::numeric_limits<uint32_t>::max();
-  }
-
-  double numvals;
-  if (step_val < 0) {
-    if (begin_val < end_val) {
-      return 0;
-    }
-    numvals = (begin_val - end_val) / (-step_val) + 1;
-  } else {
-    if (begin_val > end_val) {
-      return 0;
-    }
-    numvals = (end_val - begin_val) / step_val + 1;
-  }
-
-  return numvals;
+	if (std::isinf(begin_val) || std::isinf(end_val) || step_val == 0) {
+		return std::numeric_limits<uint32_t>::max();
+	}
+ 
+	// Use nextafter to compensate for possible floating point inaccurary where result is just below a whole number.
+	const uint32_t max = std::numeric_limits<uint32_t>::max();
+	uint32_t num_steps = std::nextafter((end_val - begin_val) / step_val, max);
+	return (num_steps == max) ? max : num_steps + 1;
 }
 
-RangeType::iterator::iterator(const RangeType &range, type_t type) : range(range), val(range.begin_val), type(type)
+RangeType::iterator::iterator(const RangeType &range, type_t type) : range(range), val(range.begin_val), type(type), 
+		num_values(range.numValues()), i_step(type == type_t::RANGE_TYPE_END ? num_values : 0)
 {
 	update_type();
 }
@@ -1026,16 +1024,19 @@ void RangeType::iterator::update_type()
 	if (range.step_val == 0) {
 		type = type_t::RANGE_TYPE_END;
 	} else if (range.step_val < 0) {
-		if (val < range.end_val) {
+		if (i_step >= num_values) {
 			type = type_t::RANGE_TYPE_END;
 		}
 	} else {
-		if (val > range.end_val) {
+		if (i_step >= num_values) {
 			type = type_t::RANGE_TYPE_END;
 		}
 	}
 
-	if (std::isnan(range.begin_val) || std::isnan(range.end_val) || std::isnan(range.step_val)) type = type_t::RANGE_TYPE_END;
+	if (std::isnan(range.begin_val) || std::isnan(range.end_val) || std::isnan(range.step_val)) {
+		type = type_t::RANGE_TYPE_END;
+		i_step = num_values;
+	}
 }
 
 RangeType::iterator::reference RangeType::iterator::operator*()
@@ -1050,7 +1051,7 @@ RangeType::iterator::pointer RangeType::iterator::operator->()
 
 RangeType::iterator::self_type RangeType::iterator::operator++()
 {
-	val += range.step_val;
+	val = range.begin_val + range.step_val * ++i_step;
 	update_type();
 	return *this;
 }
@@ -1095,14 +1096,13 @@ std::ostream& operator<<(std::ostream& stream, const RangeType& r)
 	return stream;
 }
 
-std::ostream& operator<<(std::ostream& stream, const FunctionType& f)
-{
+std::ostream& operator<<(std::ostream& stream, const FunctionType& f) {
 	stream << "function(";
 	bool first = true;
 	for (const auto& arg : f.getArgs()) {
-		stream << (first ? "" : ", ") << arg.name;
-		if (arg.expr) {
-			stream << " = " << *arg.expr;
+		stream << (first ? "" : ", ") << arg->name;
+		if (arg->expr) {
+			stream << " = " << *arg->expr;
 		}
 		first = false;
 	}

@@ -19,8 +19,8 @@ public:
 	Value evaluate_function(const std::string &name, const std::shared_ptr<EvalContext>& evalctx) const override;
 	AbstractNode *instantiate_module(const ModuleInstantiation &inst, const std::shared_ptr<EvalContext>& evalctx) const override;
 
-	const UserModule *findLocalModule(const std::string &name) const;
-	const UserFunction *findLocalFunction(const std::string &name) const;
+	shared_ptr<const UserModule> findLocalModule(const std::string &name) const;
+	shared_ptr<const UserFunction> findLocalFunction(const std::string &name) const;
 
 	const LocalScope::FunctionContainer *functions_p;
 	const LocalScope::ModuleContainer *modules_p;
@@ -29,7 +29,7 @@ public:
 	std::shared_ptr<EvalContext> evalctx;
 
 #ifdef DEBUG
-	virtual std::string dump(const class AbstractModule *mod, const ModuleInstantiation *inst);
+	virtual std::string dump(const class AbstractModule *mod, const ModuleInstantiation *inst) override;
 #endif
 
 protected:
