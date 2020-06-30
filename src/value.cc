@@ -153,7 +153,7 @@ inline bool HandleSpecialValues(const double &value, double_conversion::StringBu
   return false;
 }
 
-inline char* DoubleConvert(const double &value, char *buffer,
+inline std::string DoubleConvert(const double &value, char *buffer,
     double_conversion::StringBuilder &builder, const double_conversion::DoubleToStringConverter &dc) {
   builder.Reset();
   if (double_conversion::Double(value).IsSpecial()) {
@@ -1100,13 +1100,9 @@ std::ostream& operator<<(std::ostream& stream, const RangeType& r)
 	double_conversion::DoubleToStringConverter dc(DC_FLAGS, DC_INF,
 			DC_NAN, DC_EXP, DC_DECIMAL_LOW_EXP, DC_DECIMAL_HIGH_EXP,
 			DC_MAX_LEADING_ZEROES, DC_MAX_TRAILING_ZEROES);
-  // WARNING: Combining multiple DoubleConvert in a single chain of operator<<() here
-  // breaks things on Ubuntu 16.04 (and no other CI server) for mysterious reasons.
-  // The result is that the begin_val is output repeatedly for each begin:step:end.
-	stream << "["   << DoubleConvert(r.begin_val, buffer, builder, dc);
-	stream << " : " << DoubleConvert(r.step_val,  buffer, builder, dc);
-	stream << " : " << DoubleConvert(r.end_val,   buffer, builder, dc);
-	stream << "]";
+	stream << "[" << DoubleConvert(r.begin_val, buffer, builder, dc) << " : "
+	              << DoubleConvert(r.step_val,  buffer, builder, dc) << " : "
+	              << DoubleConvert(r.end_val,   buffer, builder, dc) << "]";
 	return stream;
 }
 
