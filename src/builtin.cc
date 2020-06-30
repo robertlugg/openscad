@@ -110,9 +110,8 @@ Builtins::Builtins()
 	this->assignments.emplace_back(new Assignment("$t", make_shared<Literal>(Value(0.0))) );
 	this->assignments.emplace_back(new Assignment("$preview", make_shared<Literal>(Value())) ); //undef as should always be overwritten.
 
-	Value::VectorPtr zero3(0.0, 0.0, 0.0);
-	this->assignments.emplace_back(new Assignment("$vpt", make_shared<Literal>(Value(zero3))) );
-	this->assignments.emplace_back(new Assignment("$vpr", make_shared<Literal>(Value(zero3))) );
+	this->assignments.emplace_back(new Assignment("$vpt", make_shared<Literal>( Value::VectorPtr(0.0,0.0,0.0) )));
+	this->assignments.emplace_back(new Assignment("$vpr", make_shared<Literal>( Value::VectorPtr(0.0,0.0,0.0) )));
 	this->assignments.emplace_back(new Assignment("$vpd", make_shared<Literal>(Value(500))) );
 }
 

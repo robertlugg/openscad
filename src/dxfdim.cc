@@ -237,7 +237,7 @@ Value builtin_dxf_cross(const std::shared_ptr<Context> ctx, const std::shared_pt
 			Value::VectorPtr ret;
 			ret->emplace_back(x);
 			ret->emplace_back(y);
-			Value val(ret);
+			Value val(std::move(ret));
 			dxf_cross_cache[key] = val.clone();
 			return val;
 		}

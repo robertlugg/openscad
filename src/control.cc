@@ -87,9 +87,8 @@ void ControlModule::for_eval(AbstractNode &node, const ModuleInstantiation &inst
 			}
 		}
 		else if (it_values.type() == Value::ValueType::VECTOR) {
-			const Value::VectorPtr &vec = it_values.toVectorPtr();
-			for (size_t i = 0; i < vec->size(); i++) {
-				c->set_variable(it_name, vec[i].clone());
+			for (const auto &el : it_values.toVector()) {
+				c->set_variable(it_name, el.clone());
 				for_eval(node, inst, l+1, c.ctx, evalctx);
 			}
 		}
@@ -236,8 +235,8 @@ AbstractNode *ControlModule::instantiate(const std::shared_ptr<Context>& ctx, co
 				AbstractNode* node;
 				if (Feature::ExperimentalLazyUnion.is_enabled()) node = new ListNode(inst, evalctx);
 				else node = new GroupNode(inst, evalctx);
-				const Value::VectorPtr &vect = value.toVectorPtr();
-				for(auto it = vect->begin(); it != vect->end(); it++) {
+				const auto &vect = value.toVector();
+				for(auto it = vect.begin(); it != vect.end(); it++) {
 					AbstractNode* childnode = getChild(std::move(*it), modulectx);
 					if (childnode==nullptr) continue; // error
 					node->children.push_back(childnode);

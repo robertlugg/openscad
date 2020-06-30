@@ -391,15 +391,12 @@ Value Vector::evaluate(const std::shared_ptr<Context>& context) const
 	for(const auto &e : this->children) {
 		Value tmpval = e->evaluate(context);
 		if (isListComprehension(e)) {
-			const Value::VectorPtr &result = tmpval.toVectorPtr();
-			for (size_t i = 0;i < result->size();i++) {
-				vec->emplace_back(result[i].clone());
-			}
+			vec.append_vector(std::move(tmpval));
 		} else {
 			vec->emplace_back(std::move(tmpval));
 		}
 	}
-	return Value(vec);
+	return vec;
 }
 
 void Vector::print(std::ostream &stream, const std::string &) const
@@ -578,7 +575,7 @@ Value FunctionCall::evaluate(const std::shared_ptr<Context>& context) const
 		if (v.type() == Value::ValueType::FUNCTION) {
 			if (name.size() > 0 && name.at(0) == '$') {
 				print_invalid_function_call("dynamically scoped variable", context, loc);
-				return {};
+				return Value();
 			} else {
 				const auto& func = v.toFunction();
 				return evaluate_function(name, func.getExpr(), func.getArgs(), func.getCtx(), evalCtx.ctx, this->loc);
@@ -587,7 +584,7 @@ Value FunctionCall::evaluate(const std::shared_ptr<Context>& context) const
 			return context->evaluate_function(name, evalCtx.ctx);
 		} else {
 			print_invalid_function_call(v.typeName(), context, loc);
-			return {};
+			return Value();
 		}
 	} catch (EvaluationException &e) {
 		if (e.traceDepth > 0) {
@@ -717,7 +714,7 @@ Value LcIf::evaluate(const std::shared_ptr<Context>& context) const
         }
     }
 
-    return Value(vec);
+    return vec;
 }
 
 void LcIf::print(std::ostream &stream, const std::string &) const
@@ -749,10 +746,7 @@ Value LcEach::evaluate(const std::shared_ptr<Context>& context) const
             }
         }
     } else if (v.type() == Value::ValueType::VECTOR) {
-        const Value::VectorPtr &vector = v.toVectorPtr();
-        for (size_t i = 0; i < vector->size(); i++) {
-            vec->emplace_back(vector[i].clone());
-        }
+        vec.append_vector(std::move(v));
     } else if (v.type() == Value::ValueType::STRING) {
         utf8_split(v.toStrUtf8Wrapper(), [&](Value v) {
             vec->emplace_back(std::move(v));
@@ -764,7 +758,7 @@ Value LcEach::evaluate(const std::shared_ptr<Context>& context) const
     if (isListComprehension(this->expr)) {
 		vec.flatten();
 	}
-	return Value(vec);
+	return vec;
 }
 
 void LcEach::print(std::ostream &stream, const std::string &) const
@@ -803,9 +797,8 @@ Value LcFor::evaluate(const std::shared_ptr<Context>& context) const
 			}
 		}
 	} else if (it_values.type() == Value::ValueType::VECTOR) {
-		const Value::VectorPtr &vec2 = it_values.toVectorPtr();
-		for (size_t i = 0; i < vec2->size(); i++) {
-			c->set_variable(it_name, vec2[i].clone());
+		for (const auto &el : it_values.toVector()) {
+			c->set_variable(it_name, el.clone());
 			vec->emplace_back(this->expr->evaluate(c.ctx));
 		}
 	} else if (it_values.type() == Value::ValueType::STRING) {
@@ -823,7 +816,7 @@ Value LcFor::evaluate(const std::shared_ptr<Context>& context) const
 		vec.flatten();
 	}
 
-	return Value(vec);
+	return vec;
 }
 
 void LcFor::print(std::ostream &stream, const std::string &) const
@@ -861,7 +854,7 @@ Value LcForC::evaluate(const std::shared_ptr<Context>& context) const
     if (isListComprehension(this->expr)) {
         vec.flatten();
     }
-	return Value(vec);
+	return vec;
 }
 
 void LcForC::print(std::ostream &stream, const std::string &) const
@@ -925,7 +918,7 @@ void evaluate_assert(const std::shared_ptr<Context>& context, const std::shared_
 Value evaluate_function(const std::string& name, const std::shared_ptr<Expression>& expr, const AssignmentList &definition_arguments,
 		const std::shared_ptr<Context>& ctx, const std::shared_ptr<EvalContext>& evalctx, const Location& loc)
 {
-	if (!expr) return {};
+	if (!expr) return Value();
 	ContextHandle<Context> c_next{Context::create<Context>(ctx)}; // Context for next tail call
 	c_next->setVariables(evalctx, definition_arguments);
 

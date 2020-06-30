@@ -226,7 +226,7 @@ public:
 	FunctionType(std::shared_ptr<Context> ctx, std::shared_ptr<Expression> expr, std::shared_ptr<AssignmentList> args)
 		: ctx(ctx), expr(expr), args(std::move(args)) { }
 	FunctionType(FunctionType&&) = default;
-    FunctionType& operator=(FunctionType&&) = default;
+	FunctionType& operator=(FunctionType&&) = default;
 	bool operator==(const FunctionType&) const { return false; }
 	bool operator!=(const FunctionType& other) const { return !(*this == other); }
 	bool operator< (const FunctionType&) const { return false; }
@@ -281,18 +281,15 @@ public:
 		Value::VectorType *operator->() const noexcept { return ptr.get(); }
 		// const accesses to VectorType require .clone to be move-able
 		const Value &operator[](size_t idx) const noexcept { return idx < ptr->size() ? (*ptr)[idx] : Value::undefined; }
-		// non-const return operator[] is only accessible from protected toVectorPtrRef
-		Value &operator[](size_t idx) noexcept {
-			static Value undef;
-			return idx < ptr->size() ? (*ptr)[idx] : undef;
-		}
+
 		bool operator==(const VectorPtr &v) const noexcept { return *ptr == *v; }
 		bool operator!=(const VectorPtr &v) const noexcept { return *ptr != *v; }
 		bool operator< (const VectorPtr &v) const noexcept { return *ptr <  *v; }
 		bool operator> (const VectorPtr &v) const noexcept { return *ptr >  *v; }
 		bool operator<=(const VectorPtr &v) const noexcept { return *ptr <= *v; }
 		bool operator>=(const VectorPtr &v) const noexcept { return *ptr >= *v; }
-		
+
+		void append_vector(Value v);
 		void flatten();
 
 	protected:
@@ -313,11 +310,8 @@ public:
 	explicit Value(const std::string &v) : value(str_utf8_wrapper(v)) {}
 	explicit Value(const char *v) : value(str_utf8_wrapper(v)) {}
 	explicit Value(const char v) : value(str_utf8_wrapper(1, v)) {}
-	Value(RangePtr& v) : value(std::move(v)) {}
 	Value(RangePtr&& v) : value(std::move(v)) {}
-	Value(VectorPtr& v) : value(std::move(v)) {}
 	Value(VectorPtr&& v) : value(std::move(v)) {}
-	Value(FunctionPtr& v) : value(std::move(v)) {}
 	Value(FunctionPtr&& v) : value(std::move(v)) {}
 
 	Value clone() const; // Use sparingly to explicitly copy a Value
@@ -341,10 +335,10 @@ public:
 	void toStream(std::ostringstream &stream) const;
 	void toStream(const tostream_visitor *visitor) const;
 	std::string chrString() const;
-	const VectorPtr &toVectorPtr() const;
+	const VectorType &toVector() const;
 protected:
 	// unsafe non-const reference needed by VectorPtr::flatten
-	VectorPtr &toVectorPtrRef() { return boost::get<VectorPtr>(this->value); };
+	VectorPtr &toVectorPtr() { return boost::get<VectorPtr>(this->value); };
 public:
 	bool getVec2(double &x, double &y, bool ignoreInfinite = false) const;
 	bool getVec3(double &x, double &y, double &z) const;
@@ -377,10 +371,6 @@ public:
 	static_assert(sizeof(Variant) <= 24, "Memory size of Value too big");
 
 private:
-	static Value multvecnum(const Value &vecval, const Value &numval);
-	static Value multmatvec(const VectorType &matrixvec, const VectorType &vectorvec);
-	static Value multvecmat(const VectorType &vectorvec, const VectorType &matrixvec);
-
 	Variant value;
 };
 

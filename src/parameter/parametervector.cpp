@@ -34,7 +34,7 @@ void ParameterVector::onChanged(double)
 			if (!this->doubleSpinBox4->isReadOnly()) {
 				vt->emplace_back(this->doubleSpinBox4->value());
 			}
-			object->value = Value(vt);
+			object->value = Value(std::move(vt));
 		}
 		emit changed();
 	}
@@ -47,7 +47,7 @@ void ParameterVector::setValue()
 	this->pageVector->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Maximum);
 	this->stackedWidgetRight->hide();
 
-	const Value::VectorType &vec = *object->value.toVectorPtr();
+	const Value::VectorType &vec = object->value.toVector();
 
 	double minV = object->values.toRange().begin_value();
 	double step = object->values.toRange().step_value();

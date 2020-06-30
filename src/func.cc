@@ -149,7 +149,7 @@ Value builtin_rands(const std::shared_ptr<Context> ctx, const std::shared_ptr<Ev
 				vec->emplace_back(distributor(deterministic_rng));
 			}
 		}
-		return Value(vec);
+		return vec;
 	} else {
 		print_argCnt_warning("rands", ctx, evalctx);
 	}
@@ -165,9 +165,10 @@ Value builtin_min(const std::shared_ptr<Context> ctx, const std::shared_ptr<Eval
 	if (n >= 1) {
 		Value v0 = evalctx->getArgValue(0);
 
-		if (n == 1 && v0.type() == Value::ValueType::VECTOR && !v0.toVectorPtr()->empty()) {
-			const Value::VectorPtr &vec = v0.toVectorPtr();
-			return std::min_element(vec->cbegin(), vec->cend())->clone();
+		if (n == 1 && v0.type() == Value::ValueType::VECTOR) {
+			const auto &vec = v0.toVector();
+			if (!vec.empty())
+				return std::min_element(vec.cbegin(), vec.cend())->clone();
 		}
 		if (v0.type() == Value::ValueType::NUMBER) {
 			double val = v0.toDouble();
@@ -181,8 +182,7 @@ Value builtin_min(const std::shared_ptr<Context> ctx, const std::shared_ptr<Eval
 			}
 			return Value(val);
 		}
-		
-	}else{
+	} else {
 		print_argCnt_warning("min", ctx, evalctx);
 		return Value();
 	}
@@ -199,9 +199,10 @@ Value builtin_max(const std::shared_ptr<Context> ctx, const std::shared_ptr<Eval
 	if (n >= 1) {
 		Value v0 = evalctx->getArgValue(0);
 
-		if (n == 1 && v0.type() == Value::ValueType::VECTOR && !v0.toVectorPtr()->empty()) {
-			const Value::VectorPtr &vec = v0.toVectorPtr();
-			return std::max_element(vec->begin(), vec->end())->clone();
+		if (n == 1 && v0.type() == Value::ValueType::VECTOR) {
+			const auto &vec = v0.toVector();
+			if (!vec.empty())
+				return std::max_element(vec.begin(), vec.end())->clone();
 		}
 		if (v0.type() == Value::ValueType::NUMBER) {
 			double val = v0.toDouble();
@@ -423,7 +424,7 @@ Value builtin_length(const std::shared_ptr<Context> ctx, const std::shared_ptr<E
 {
 	if (evalctx->numArgs() == 1) {
 		Value v = evalctx->getArgValue(0);
-		if (v.type() == Value::ValueType::VECTOR) return Value(int(v.toVectorPtr()->size()));
+		if (v.type() == Value::ValueType::VECTOR) return Value(int(v.toVector().size()));
 		if (v.type() == Value::ValueType::STRING) {
 			//Unicode glyph count for the length -- rather than the string (num. of bytes) length.
 			return Value(double( v.toStrUtf8Wrapper().get_utf8_strlen()));
@@ -533,14 +534,12 @@ Value builtin_concat(const std::shared_ptr<Context>, const std::shared_ptr<EvalC
 	for (size_t i = 0; i < evalctx->numArgs(); i++) {
 		Value val = evalctx->getArgValue(i);
 		if (val.type() == Value::ValueType::VECTOR) {
-			for(const auto &v : *val.toVectorPtr()) {
-				result->push_back(v.clone());
-			}
+			result.append_vector(std::move(val));
 		} else {
 			result->push_back(std::move(val));
 		}
 	}
-	return Value(result);
+	return result;
 }
 
 Value builtin_lookup(const std::shared_ptr<Context> ctx, const std::shared_ptr<EvalContext> evalctx)
@@ -556,15 +555,18 @@ Value builtin_lookup(const std::shared_ptr<Context> ctx, const std::shared_ptr<E
 	}
 
 	Value v1 = evalctx->getArgValue(1);
-	const Value::VectorPtr &vec = v1.toVectorPtr();
-	if (vec->empty()) return Value(); // Second must be a vector
-	if (vec[0].toVectorPtr()->size() < 2) return Value(); // ..of vectors
+	const auto &vec = v1.toVector();
 
-	if (!vec[0].getVec2(low_p, low_v) || !vec[0].getVec2(high_p, high_v))
+	// Second must be a vector of vectors, with valid
+	if (vec.empty() || vec[0].toVector().size() < 2 || !vec[0].getVec2(low_p, low_v)) {
 		return Value();
-	for (size_t i = 1; i < vec->size(); i++) {
+	}
+	high_p = low_p;
+	high_v = low_v;
+
+	for (auto it = vec.begin()+1; it != vec.end(); ++it) {
 		double this_p, this_v;
-		if (vec[i].getVec2(this_p, this_v)) {
+		if (it->getVec2(this_p, this_v)) {
 			if (this_p <= p && (this_p > low_p || low_p > p)) {
 				low_p = this_p;
 				low_v = this_v;
@@ -665,27 +667,27 @@ static Value::VectorPtr search(const str_utf8_wrapper &find, const str_utf8_wrap
 			if (ptr_ft) g_utf8_strncpy(utf8_of_cp, ptr_ft, 1);
 		}
 		if (num_returns_per_match == 0 || num_returns_per_match > 1) {
-			returnvec->emplace_back(resultvec);
+			returnvec->emplace_back(std::move(resultvec));
 		}
 	}
 	return returnvec;
 }
 
-static Value::VectorPtr search(const str_utf8_wrapper &find, const Value::VectorPtr &table,
+static Value::VectorPtr search(const str_utf8_wrapper &find, const Value::VectorType &table,
 		unsigned int num_returns_per_match, unsigned int index_col_num,
 		const Location &loc, const std::shared_ptr<Context> ctx)
 {
 	Value::VectorPtr returnvec;
 	//Unicode glyph count for the length
 	unsigned int findThisSize =  find.get_utf8_strlen();
-	unsigned int searchTableSize = table->size();
+	unsigned int searchTableSize = table.size();
 	for (size_t i = 0; i < findThisSize; i++) {
 		unsigned int matchCount = 0;
 		Value::VectorPtr resultvec;
 		const gchar *ptr_ft = g_utf8_offset_to_pointer(find.c_str(), i);
 		for (size_t j = 0; j < searchTableSize; j++) {
-			const Value::VectorPtr &entryVec = table[j].toVectorPtr();
-			if (entryVec->size() <= index_col_num) {
+			const auto &entryVec = table[j].toVector();
+			if (entryVec.size() <= index_col_num) {
 				PRINTB("WARNING: Invalid entry in search vector at index %d, required number of values in the entry: %d. Invalid entry: %s, %s", j % (index_col_num + 1) % table[j].toEchoString() % loc.toRelativeString(ctx->documentPath()));
 				return Value::VectorPtr();
 			}
@@ -709,7 +711,7 @@ static Value::VectorPtr search(const str_utf8_wrapper &find, const Value::Vector
 			PRINTB("  WARNING: search term not found: \"%s\", %s", utf8_of_cp % loc.toRelativeString(ctx->documentPath()));
 		}
 		if (num_returns_per_match == 0 || num_returns_per_match > 1) {
-			returnvec->emplace_back(resultvec);
+			returnvec->emplace_back(std::move(resultvec));
 		}
 	}
 	return returnvec;
@@ -731,39 +733,36 @@ Value builtin_search(const std::shared_ptr<Context> ctx, const std::shared_ptr<E
 
 	if (findThis.type() == Value::ValueType::NUMBER) {
 		unsigned int matchCount = 0;
-		for (size_t j = 0; j < searchTable.toVectorPtr()->size(); j++) {
-			Value search_element = searchTable.toVectorPtr()[j].clone();
-
+		size_t j = 0;
+		for (const auto &search_element : searchTable.toVector()) {
 			if ((index_col_num == 0 && findThis == search_element) ||
-					(index_col_num < search_element.toVectorPtr()->size() &&
-					 findThis      == search_element.toVectorPtr()[index_col_num])) {
+			    (index_col_num < search_element.toVector().size() &&
+			     findThis == search_element.toVector()[index_col_num])) {
 				returnvec->emplace_back(double(j));
 				matchCount++;
 				if (num_returns_per_match != 0 && matchCount >= num_returns_per_match) break;
 			}
+			++j;
 		}
 	} else if (findThis.type() == Value::ValueType::STRING) {
 		if (searchTable.type() == Value::ValueType::STRING) {
 			returnvec = search(findThis.toStrUtf8Wrapper(), searchTable.toStrUtf8Wrapper(), num_returns_per_match, evalctx->loc);
 		}
 		else {
-			returnvec = search(findThis.toStrUtf8Wrapper(), searchTable.toVectorPtr(), num_returns_per_match, index_col_num, evalctx->loc, ctx);
+			returnvec = search(findThis.toStrUtf8Wrapper(), searchTable.toVector(), num_returns_per_match, index_col_num, evalctx->loc, ctx);
 		}
 	} else if (findThis.type() == Value::ValueType::VECTOR) {
-		const Value::VectorPtr &findVec = findThis.toVectorPtr();
-		for (size_t i = 0; i < findVec->size(); i++) {
-		  unsigned int matchCount = 0;
+		const auto &findVec = findThis.toVector();
+		for (size_t i = 0; i < findVec.size(); i++) {
+			unsigned int matchCount = 0;
 			Value::VectorPtr resultvec;
 
-			Value find_value = findVec[i].clone();
-			const Value::VectorPtr &localTable = searchTable.toVectorPtr();
-			for (size_t j = 0; j < localTable->size(); j++) {
-
-				Value search_element = localTable[j].clone();
-
+			const auto &find_value = findVec[i];
+			size_t j = 0;
+			for (const auto &search_element : searchTable.toVector()) {
 				if ((index_col_num == 0 && find_value == search_element) ||
-						(index_col_num < search_element.toVectorPtr()->size() &&
-						 find_value   == search_element.toVectorPtr()[index_col_num])) {
+				    (index_col_num < search_element.toVector().size() &&
+				     find_value   == search_element.toVector()[index_col_num])) {
 					matchCount++;
 					if (num_returns_per_match == 1) {
 						returnvec->emplace_back(double(j));
@@ -773,18 +772,19 @@ Value builtin_search(const std::shared_ptr<Context> ctx, const std::shared_ptr<E
 					}
 					if (num_returns_per_match > 1 && matchCount >= num_returns_per_match) break;
 				}
+				++j;
 			}
 			if (num_returns_per_match == 1 && matchCount == 0) {
-				returnvec->emplace_back(resultvec);
+				returnvec->emplace_back(std::move(resultvec));
 			}
 			if (num_returns_per_match == 0 || num_returns_per_match > 1) {
-				returnvec->emplace_back(resultvec);
+				returnvec->emplace_back(std::move(resultvec));
 			}
 		}
 	} else {
 		return Value();
 	}
-	return Value(returnvec);
+	return returnvec;
 }
 
 #define QUOTE(x__) # x__
@@ -798,7 +798,7 @@ Value builtin_version(const std::shared_ptr<Context>, const std::shared_ptr<Eval
 #ifdef OPENSCAD_DAY
 	vec->emplace_back(double(OPENSCAD_DAY));
 #endif
-	return Value(vec);
+	return vec;
 }
 
 Value builtin_version_num(const std::shared_ptr<Context> ctx, const std::shared_ptr<EvalContext> evalctx)
@@ -841,20 +841,19 @@ Value builtin_parent_module(const std::shared_ptr<Context> ctx, const std::share
 Value builtin_norm(const std::shared_ptr<Context> ctx, const std::shared_ptr<EvalContext> evalctx)
 {
 	if (evalctx->numArgs() == 1) {
-		 Value val = evalctx->getArgValue(0);
+		Value val = evalctx->getArgValue(0);
 		if (val.type() == Value::ValueType::VECTOR) {
 			double sum = 0;
-			const Value::VectorPtr &v = val.toVectorPtr();
-			size_t n = v->size();
-			for (size_t i = 0; i < n; i++)
-				if (v[i].type() == Value::ValueType::NUMBER) {
+			for (const auto &v : val.toVector()) {
+				if (v.type() == Value::ValueType::NUMBER) {
 					// sum += pow(v[i].toDouble(),2);
-					double x = v[i].toDouble();
+					double x = v.toDouble();
 					sum += x*x;
 				} else {
 					PRINTB("WARNING: Incorrect arguments to norm(), %s", evalctx->loc.toRelativeString(ctx->documentPath()));
 					return Value();
 				}
+			}
 			return Value(sqrt(sum));
 		}
 	}else{
@@ -878,13 +877,13 @@ Value builtin_cross(const std::shared_ptr<Context> ctx, const std::shared_ptr<Ev
 		return Value();
 	}
 	
-	const Value::VectorPtr &v0 = arg0.toVectorPtr();
-	const Value::VectorPtr &v1 = arg1.toVectorPtr();
-	if ((v0->size() == 2) && (v1->size() == 2)) {
+	const auto &v0 = arg0.toVector();
+	const auto &v1 = arg1.toVector();
+	if ((v0.size() == 2) && (v1.size() == 2)) {
 		return Value(v0[0].toDouble() * v1[1].toDouble() - v0[1].toDouble() * v1[0].toDouble());
 	}
 
-	if ((v0->size() != 3) || (v1->size() != 3)) {
+	if ((v0.size() != 3) || (v1.size() != 3)) {
 		PRINTB("WARNING: Invalid vector size of parameter for cross(), %s", loc.toRelativeString(ctx->documentPath()));
 		return Value();
 	}
@@ -913,7 +912,7 @@ Value builtin_cross(const std::shared_ptr<Context> ctx, const std::shared_ptr<Ev
 	result->emplace_back(x);
 	result->emplace_back(y);
 	result->emplace_back(z);
-	return Value(result);
+	return result;
 }
 
 Value builtin_is_undef(const std::shared_ptr<Context> ctx, const std::shared_ptr<EvalContext> evalctx)
@@ -1002,7 +1001,7 @@ Value builtin_is_function(const std::shared_ptr<Context> ctx, const std::shared_
 	} else {
 		print_argCnt_warning("is_function", ctx, evalctx);
 	}
-	return {};
+	return Value();
 }
 
 void register_builtin_functions()
